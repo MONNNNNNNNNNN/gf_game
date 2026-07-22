@@ -123,22 +123,28 @@ export class BoardScene extends Phaser.Scene {
     }
 
     this.busy = true;
-    this.grid.swap(a, b);
-    await this.swapSprites(a, b);
-    this.combo.reset(this.run.getModifiers().softComboReset);
-    await this.resolveAndAnimate();
+    try {
+      this.grid.swap(a, b);
+      await this.swapSprites(a, b);
+      this.combo.reset(this.run.getModifiers().softComboReset);
+      await this.resolveAndAnimate();
 
-    if (!hasAnyValidMove(this.grid)) {
-      const instant = Math.random() < this.run.getModifiers().freeReshuffleChance;
-      if (!instant) {
-        eventBus.emit('board:stuck', undefined);
-        await this.delay(1400);
+      if (!hasAnyValidMove(this.grid)) {
+        const instant = Math.random() < this.run.getModifiers().freeReshuffleChance;
+        if (!instant) {
+          eventBus.emit('board:stuck', undefined);
+          await this.delay(1400);
+        }
+        shuffleGrid(this.grid);
+        await this.reshuffleAnimation();
+        if (!instant) eventBus.emit('board:reshuffled', undefined);
       }
-      shuffleGrid(this.grid);
-      await this.reshuffleAnimation();
-      if (!instant) eventBus.emit('board:reshuffled', undefined);
+    } catch (err) {
+      // never leave the board permanently frozen because one animation step threw
+      console.error('attemptSwap failed, recovering board state', err);
+    } finally {
+      this.busy = false;
     }
-    this.busy = false;
   }
 
   private async animateInvalidSwap(a: GridPos, b: GridPos): Promise<void> {

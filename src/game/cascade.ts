@@ -1,5 +1,6 @@
 import { Grid, randomTile } from './grid';
 import { findMatches, type MatchResult } from './matchLogic';
+import { detectSquares, classifySpecialSpawns, type SpecialSpawn } from './specialTiles';
 import type { GridPos } from '../lib/types';
 
 export interface FallMove {
@@ -13,29 +14,49 @@ export interface SpawnedTile {
 
 export interface CascadeStep {
   matches: MatchResult[];
+  spawnedSpecials: SpecialSpawn[];
   fallMoves: FallMove[];
   spawned: SpawnedTile[];
 }
 
-export function resolveBoard(grid: Grid, rng: () => number = Math.random): CascadeStep[] {
+export function resolveBoard(
+  grid: Grid,
+  swapTarget?: GridPos,
+  bombThreshold = 5,
+  rng: () => number = Math.random,
+): CascadeStep[] {
   const steps: CascadeStep[] = [];
   let matches = findMatches(grid);
-  while (matches.length > 0) {
-    clearMatches(grid, matches);
-    const fallMoves = applyGravity(grid);
-    const spawned = refill(grid, rng);
-    steps.push({ matches, fallMoves, spawned });
-    matches = findMatches(grid);
-  }
-  return steps;
-}
+  let isFirstIteration = true;
 
-function clearMatches(grid: Grid, matches: MatchResult[]): void {
-  for (const match of matches) {
-    for (const pos of match.positions) {
+  // do-while (not while): must run at least once even with zero initial matches, since this
+  // is also used to resolve gravity/refill after a special-tile detonation clears cells that
+  // don't necessarily form a "match" - those empty cells still need to fall/refill.
+  do {
+    const squareMatches = detectSquares(grid);
+    const { spawns, plainClearPositions } = classifySpecialSpawns(
+      matches,
+      squareMatches,
+      isFirstIteration ? swapTarget : undefined,
+      bombThreshold,
+    );
+
+    for (const spawn of spawns) {
+      grid.setSpecial(spawn.pos.row, spawn.pos.col, { kind: spawn.kind, baseTile: spawn.baseTile });
+    }
+    for (const pos of plainClearPositions) {
       grid.setEmpty(pos.row, pos.col);
     }
-  }
+
+    const fallMoves = applyGravity(grid);
+    const spawned = refill(grid, rng);
+    steps.push({ matches, spawnedSpecials: spawns, fallMoves, spawned });
+
+    isFirstIteration = false;
+    matches = findMatches(grid);
+  } while (matches.length > 0);
+
+  return steps;
 }
 
 function applyGravity(grid: Grid): FallMove[] {
@@ -46,7 +67,7 @@ function applyGravity(grid: Grid): FallMove[] {
       const tile = grid.get(row, col);
       if (tile !== null) {
         if (writeRow !== row) {
-          grid.set(writeRow, col, tile);
+          grid.setCell(writeRow, col, tile);
           grid.setEmpty(row, col);
           moves.push({ from: { row, col }, to: { row: writeRow, col } });
         }

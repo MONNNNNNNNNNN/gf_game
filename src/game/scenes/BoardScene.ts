@@ -1,9 +1,11 @@
 import Phaser from 'phaser';
-import { Grid, createGrid, GRID_WIDTH, GRID_HEIGHT } from '../grid';
+import { Grid, createGrid, isTileType, isSpecialTile, GRID_WIDTH, GRID_HEIGHT } from '../grid';
 import { hasAnyValidMove, isValidSwap } from '../matchLogic';
-import { resolveBoard } from '../cascade';
+import { resolveBoard, type CascadeStep } from '../cascade';
+import { resolveSoloActivation, resolveComboActivation, type ActivatedTile } from '../specialTiles';
 import { ComboTracker } from '../scoring';
 import { TileSprite } from '../tileSprite';
+import { SpecialTileSprite } from '../specialTileSprite';
 import { createInputController } from '../inputController';
 import { shuffleGrid } from '../reshuffle';
 import { RunController } from '../run/RunController';
@@ -11,11 +13,13 @@ import { eventBus } from '../../app/eventBus';
 import * as storage from '../../lib/storage';
 import { submitScore } from '../../lib/leaderboard';
 import { logRunEnded } from '../../lib/analytics';
-import type { GridPos } from '../../lib/types';
+import type { GridPos, TileType } from '../../lib/types';
+
+type BoardSprite = TileSprite | SpecialTileSprite;
 
 export class BoardScene extends Phaser.Scene {
   private grid!: Grid;
-  private sprites: (TileSprite | null)[] = [];
+  private sprites: (BoardSprite | null)[] = [];
   private cellSize = 0;
   private originX = 0;
   private originY = 0;
@@ -25,6 +29,7 @@ export class BoardScene extends Phaser.Scene {
   private highlightedIndex: number | null = null;
   private run!: RunController;
   private runEndHandled = false;
+  private colorblindMode = storage.getColorblindMode();
 
   constructor() {
     super('BoardScene');
@@ -37,6 +42,10 @@ export class BoardScene extends Phaser.Scene {
     eventBus.on('game:restart', () => this.restart());
     eventBus.on('run:choiceMade', ({ itemId }) => this.run.applyItemChoice(itemId));
     eventBus.on('run:rerollRequested', () => this.run.rerollChoices());
+    eventBus.on('settings:colorblind', ({ enabled }) => {
+      this.colorblindMode = enabled;
+      this.sprites.forEach((s) => s?.setColorblindMode(enabled));
+    });
   }
 
   update(_time: number, delta: number): void {
@@ -68,14 +77,21 @@ export class BoardScene extends Phaser.Scene {
     return { x: this.originX + pos.col * this.cellSize, y: this.originY + pos.row * this.cellSize };
   }
 
+  private createSpriteAt(pos: GridPos): BoardSprite | null {
+    const cell = this.grid.get(pos.row, pos.col);
+    const { x, y } = this.cellToWorld(pos);
+    const radius = this.cellSize * 0.38;
+    if (isTileType(cell)) return new TileSprite(this, x, y, radius, cell, this.colorblindMode);
+    if (isSpecialTile(cell)) return new SpecialTileSprite(this, x, y, radius, cell.kind, cell.baseTile);
+    return null;
+  }
+
   private renderAllTiles(): void {
     this.sprites = new Array(this.grid.width * this.grid.height).fill(null);
     for (let row = 0; row < this.grid.height; row++) {
       for (let col = 0; col < this.grid.width; col++) {
-        const tile = this.grid.get(row, col);
-        if (!tile) continue;
-        const { x, y } = this.cellToWorld({ row, col });
-        this.sprites[this.grid.index(row, col)] = new TileSprite(this, x, y, this.cellSize * 0.38, tile);
+        const sprite = this.createSpriteAt({ row, col });
+        if (sprite) this.sprites[this.grid.index(row, col)] = sprite;
       }
     }
   }
@@ -90,6 +106,8 @@ export class BoardScene extends Phaser.Scene {
       isBusy: () => this.busy || this.run.isPaused,
       onSwapAttempt: (a, b) => this.attemptSwap(a, b),
       onSelectionChange: (pos) => this.handleSelectionChange(pos),
+      isActivatable: (pos) => isSpecialTile(this.grid.get(pos.row, pos.col)),
+      onActivate: (pos) => void this.activateSpecialTileAlone(pos),
     });
   }
 
@@ -117,28 +135,44 @@ export class BoardScene extends Phaser.Scene {
 
   private async attemptSwap(a: GridPos, b: GridPos): Promise<void> {
     if (this.busy || this.run.isPaused) return;
-    if (!isValidSwap(this.grid, a, b)) {
+
+    const cellA = this.grid.get(a.row, a.col);
+    const cellB = this.grid.get(b.row, b.col);
+    const involvesSpecial = isSpecialTile(cellA) || isSpecialTile(cellB);
+
+    if (!involvesSpecial && !isValidSwap(this.grid, a, b)) {
       await this.animateInvalidSwap(a, b);
       return;
     }
 
     this.busy = true;
     try {
-      this.grid.swap(a, b);
-      await this.swapSprites(a, b);
-      this.combo.reset(this.run.getModifiers().softComboReset);
-      await this.resolveAndAnimate();
+      if (involvesSpecial) {
+        // a special-tile swap is a UI gesture that triggers activation, not a real
+        // relocation - animate the sprites sliding together but leave the grid (and
+        // the sprite array's index-to-position bookkeeping) alone, so `a`/`b` still
+        // correctly identify where each special tile actually is
+        await this.slideSpritesTogether(a, b);
 
-      if (!hasAnyValidMove(this.grid)) {
-        const instant = Math.random() < this.run.getModifiers().freeReshuffleChance;
-        if (!instant) {
-          eventBus.emit('board:stuck', undefined);
-          await this.delay(1400);
-        }
-        shuffleGrid(this.grid);
-        await this.reshuffleAnimation();
-        if (!instant) eventBus.emit('board:reshuffled', undefined);
+        const modifiers = this.run.getModifiers();
+        const activated: ActivatedTile[] = [];
+        if (isSpecialTile(cellA)) activated.push({ pos: a, kind: cellA.kind });
+        if (isSpecialTile(cellB)) activated.push({ pos: b, kind: cellB.kind });
+        const affected =
+          activated.length === 2
+            ? resolveComboActivation(this.grid, activated[0], activated[1])
+            : resolveSoloActivation(this.grid, activated[0], 1 + modifiers.bombBlastRadiusBonus, modifiers.butterflyExtraSnipes);
+        const baseTile = (isSpecialTile(cellA) ? cellA.baseTile : (cellB as { baseTile: TileType }).baseTile) ?? 'red';
+        await this.detonate(affected, baseTile);
+      } else {
+        this.grid.swap(a, b);
+        await this.swapSprites(a, b);
+        this.combo.reset(this.run.getModifiers().softComboReset);
+        const steps = resolveBoard(this.grid, b, 5 - this.run.getModifiers().bombThresholdReduction);
+        await this.animateSteps(steps);
       }
+
+      await this.finishTurn();
     } catch (err) {
       // never leave the board permanently frozen because one animation step threw
       console.error('attemptSwap failed, recovering board state', err);
@@ -147,10 +181,84 @@ export class BoardScene extends Phaser.Scene {
     }
   }
 
+  private async activateSpecialTileAlone(pos: GridPos): Promise<void> {
+    if (this.busy || this.run.isPaused) return;
+    const cell = this.grid.get(pos.row, pos.col);
+    if (!isSpecialTile(cell)) return;
+
+    this.busy = true;
+    try {
+      const modifiers = this.run.getModifiers();
+      const affected = resolveSoloActivation(
+        this.grid,
+        { pos, kind: cell.kind },
+        1 + modifiers.bombBlastRadiusBonus,
+        modifiers.butterflyExtraSnipes,
+      );
+      await this.detonate(affected, cell.baseTile);
+      await this.finishTurn();
+    } catch (err) {
+      console.error('activateSpecialTileAlone failed, recovering board state', err);
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  /** Clears an arbitrary set of positions (a special-tile blast), scores it like any other
+   * match, then hands off to resolveBoard for the resulting gravity/refill/re-match cascade. */
+  private async detonate(positions: GridPos[], baseTile: TileType): Promise<void> {
+    if (positions.length === 0) return;
+
+    const clearPromises: Promise<void>[] = [];
+    for (const pos of positions) {
+      const idx = this.grid.index(pos.row, pos.col);
+      const sprite = this.sprites[idx];
+      if (sprite) {
+        clearPromises.push(sprite.clear(this));
+        this.sprites[idx] = null;
+      }
+      this.grid.setEmpty(pos.row, pos.col);
+    }
+    await Promise.all(clearPromises);
+
+    this.combo.reset(this.run.getModifiers().softComboReset);
+    const detonationStep: CascadeStep = {
+      matches: [{ positions, tile: baseTile }],
+      spawnedSpecials: [],
+      fallMoves: [],
+      spawned: [],
+    };
+    this.scoreStep(detonationStep);
+
+    const steps = resolveBoard(this.grid, undefined, 5 - this.run.getModifiers().bombThresholdReduction);
+    await this.animateSteps(steps);
+  }
+
+  private async finishTurn(): Promise<void> {
+    if (!hasAnyValidMove(this.grid)) {
+      const instant = Math.random() < this.run.getModifiers().freeReshuffleChance;
+      if (!instant) {
+        eventBus.emit('board:stuck', undefined);
+        await this.delay(1400);
+      }
+      shuffleGrid(this.grid);
+      await this.reshuffleAnimation();
+      if (!instant) eventBus.emit('board:reshuffled', undefined);
+    }
+  }
+
   private async animateInvalidSwap(a: GridPos, b: GridPos): Promise<void> {
     const spriteA = this.sprites[this.grid.index(a.row, a.col)];
     const spriteB = this.sprites[this.grid.index(b.row, b.col)];
     await Promise.all([spriteA?.shake(this), spriteB?.shake(this)]);
+  }
+
+  private async slideSpritesTogether(a: GridPos, b: GridPos): Promise<void> {
+    const spriteA = this.sprites[this.grid.index(a.row, a.col)];
+    const spriteB = this.sprites[this.grid.index(b.row, b.col)];
+    const worldA = this.cellToWorld(a);
+    const worldB = this.cellToWorld(b);
+    await Promise.all([spriteA?.moveTo(this, worldB.x, worldB.y), spriteB?.moveTo(this, worldA.x, worldA.y)]);
   }
 
   private async swapSprites(a: GridPos, b: GridPos): Promise<void> {
@@ -165,9 +273,25 @@ export class BoardScene extends Phaser.Scene {
     this.sprites[bi] = spriteA;
   }
 
-  private async resolveAndAnimate(): Promise<void> {
-    const steps = resolveBoard(this.grid);
+  private scoreStep(step: CascadeStep): void {
+    const modifiers = this.run.getModifiers();
+    const scoreEvent = this.combo.scoreStep(step, {
+      scoreMultiplier: modifiers.scoreMultiplier,
+      cascadeStepBonus: modifiers.cascadeStepBonus,
+      longMatchBonusMultiplier: modifiers.longMatchBonusMultiplier,
+    });
+    this.score += scoreEvent.points;
+    eventBus.emit('score:update', { score: this.score });
+    eventBus.emit('combo:update', { combo: scoreEvent.combo });
 
+    this.run.registerCascadeStep(step, scoreEvent);
+
+    if (storage.setHighScoreIfBeaten(this.score)) {
+      eventBus.emit('highscore:beaten', { score: this.score });
+    }
+  }
+
+  private async animateSteps(steps: CascadeStep[]): Promise<void> {
     for (const step of steps) {
       const clearPromises: Promise<void>[] = [];
       for (const match of step.matches) {
@@ -181,6 +305,18 @@ export class BoardScene extends Phaser.Scene {
         }
       }
       await Promise.all(clearPromises);
+
+      for (const spawn of step.spawnedSpecials) {
+        const idx = this.grid.index(spawn.pos.row, spawn.pos.col);
+        this.sprites[idx] = new SpecialTileSprite(
+          this,
+          this.cellToWorld(spawn.pos).x,
+          this.cellToWorld(spawn.pos).y,
+          this.cellSize * 0.38,
+          spawn.kind,
+          spawn.baseTile,
+        );
+      }
 
       const fallPromises: Promise<void>[] = [];
       for (const move of step.fallMoves) {
@@ -200,29 +336,19 @@ export class BoardScene extends Phaser.Scene {
       for (const spawn of step.spawned) {
         const idx = this.grid.index(spawn.pos.row, spawn.pos.col);
         const tile = this.grid.get(spawn.pos.row, spawn.pos.col);
-        if (!tile) continue;
+        if (!isTileType(tile)) continue; // refill only ever spawns plain tiles
         const world = this.cellToWorld(spawn.pos);
         const startY = world.y - this.cellSize * (spawn.pos.row + 1);
-        const sprite = new TileSprite(this, world.x, startY, this.cellSize * 0.38, tile);
+        const sprite = new TileSprite(this, world.x, startY, this.cellSize * 0.38, tile, this.colorblindMode);
         this.sprites[idx] = sprite;
         spawnPromises.push(sprite.dropIn(this, startY, world.y));
       }
       await Promise.all(spawnPromises);
 
-      const modifiers = this.run.getModifiers();
-      const scoreEvent = this.combo.scoreStep(step, {
-        scoreMultiplier: modifiers.scoreMultiplier,
-        cascadeStepBonus: modifiers.cascadeStepBonus,
-        longMatchBonusMultiplier: modifiers.longMatchBonusMultiplier,
-      });
-      this.score += scoreEvent.points;
-      eventBus.emit('score:update', { score: this.score });
-      eventBus.emit('combo:update', { combo: scoreEvent.combo });
-
-      this.run.registerCascadeStep(step, scoreEvent);
-
-      if (storage.setHighScoreIfBeaten(this.score)) {
-        eventBus.emit('highscore:beaten', { score: this.score });
+      // a step with zero matches (pure gravity/refill after a special-tile detonation) has
+      // nothing meaningful to score - scoring for the detonation itself already happened in detonate()
+      if (step.matches.length > 0 && step.matches.some((m) => m.positions.length > 0)) {
+        this.scoreStep(step);
       }
     }
   }

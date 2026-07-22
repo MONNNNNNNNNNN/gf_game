@@ -1,5 +1,6 @@
 const HIGH_SCORE_KEY = 'gf_game.highScore';
 const SOUND_KEY = 'gf_game.soundEnabled';
+const COLORBLIND_KEY = 'gf_game.colorblindMode';
 const NICKNAME_KEY = 'gf_game.nickname';
 const LOCAL_SCORES_KEY = 'gf_game.localScores';
 const MAX_LOCAL_SCORES = 20;
@@ -50,6 +51,14 @@ export function getSoundEnabled(): boolean {
 
 export function setSoundEnabled(enabled: boolean): void {
   safeSet(SOUND_KEY, enabled ? '1' : '0');
+}
+
+export function getColorblindMode(): boolean {
+  return safeGet(COLORBLIND_KEY) === '1';
+}
+
+export function setColorblindMode(enabled: boolean): void {
+  safeSet(COLORBLIND_KEY, enabled ? '1' : '0');
 }
 
 export function getNickname(): string | null {

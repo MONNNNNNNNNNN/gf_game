@@ -13,6 +13,9 @@ export interface Modifiers {
   overflowAllowance: number;
   timeFloor: number;
   freeRerollCount: number;
+  bombThresholdReduction: number;
+  butterflyExtraSnipes: number;
+  bombBlastRadiusBonus: number;
 }
 
 export function defaultModifiers(): Modifiers {
@@ -29,6 +32,9 @@ export function defaultModifiers(): Modifiers {
     overflowAllowance: 0,
     timeFloor: 0,
     freeRerollCount: 0,
+    bombThresholdReduction: 0,
+    butterflyExtraSnipes: 0,
+    bombBlastRadiusBonus: 0,
   };
 }
 
@@ -137,6 +143,33 @@ export const ITEMS: Record<string, ItemDef> = {
     maxLevel: 1,
     apply: (m) => {
       m.softComboReset = true;
+    },
+  },
+  sweet_tooth: {
+    id: 'sweet_tooth',
+    name: 'Sweet Tooth',
+    description: 'Bombs form from 4-in-a-row instead of 5',
+    maxLevel: 1,
+    apply: (m) => {
+      m.bombThresholdReduction = 1;
+    },
+  },
+  swarm: {
+    id: 'swarm',
+    name: 'Swarm',
+    description: "Butterfly's snipe hits 1 extra tile per level",
+    maxLevel: 2,
+    apply: (m, lvl) => {
+      m.butterflyExtraSnipes += lvl;
+    },
+  },
+  detonator: {
+    id: 'detonator',
+    name: 'Detonator',
+    description: 'Solo Bomb taps blast a 5x5 area instead of 3x3',
+    maxLevel: 1,
+    apply: (m) => {
+      m.bombBlastRadiusBonus = 1;
     },
   },
 };

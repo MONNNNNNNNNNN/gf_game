@@ -3,7 +3,22 @@ import { TILE_TYPES, type TileType, type GridPos } from '../lib/types';
 export const GRID_WIDTH = 8;
 export const GRID_HEIGHT = 8;
 
-export type Cell = TileType | null;
+export type SpecialKind = 'lineRow' | 'lineCol' | 'butterfly' | 'bomb';
+
+export interface SpecialTile {
+  kind: SpecialKind;
+  baseTile: TileType;
+}
+
+export type Cell = TileType | SpecialTile | null;
+
+export function isTileType(cell: Cell): cell is TileType {
+  return typeof cell === 'string';
+}
+
+export function isSpecialTile(cell: Cell): cell is SpecialTile {
+  return cell !== null && typeof cell === 'object';
+}
 
 export class Grid {
   width: number;
@@ -26,6 +41,14 @@ export class Grid {
 
   set(row: number, col: number, tile: TileType): void {
     this.cells[this.index(row, col)] = tile;
+  }
+
+  setSpecial(row: number, col: number, special: SpecialTile): void {
+    this.cells[this.index(row, col)] = special;
+  }
+
+  setCell(row: number, col: number, cell: Cell): void {
+    this.cells[this.index(row, col)] = cell;
   }
 
   setEmpty(row: number, col: number): void {

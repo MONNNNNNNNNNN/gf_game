@@ -11,7 +11,8 @@ function scanRuns(length: number, getCell: (i: number) => Cell): { start: number
   let i = 0;
   while (i < length) {
     const tile = getCell(i);
-    if (tile === null) {
+    if (typeof tile !== 'string') {
+      // special tiles behave like empty cells for forming NEW runs - they never auto-match by color
       i++;
       continue;
     }
@@ -47,7 +48,7 @@ export function findMatches(grid: Grid): MatchResult[] {
 
 export function hasMatchAt(grid: Grid, pos: GridPos): boolean {
   const tile = grid.get(pos.row, pos.col);
-  if (tile === null) return false;
+  if (typeof tile !== 'string') return false;
 
   let count = 1;
   for (let c = pos.col - 1; c >= 0 && grid.get(pos.row, c) === tile; c--) count++;
@@ -62,6 +63,14 @@ export function hasMatchAt(grid: Grid, pos: GridPos): boolean {
 
 export function isValidSwap(grid: Grid, a: GridPos, b: GridPos): boolean {
   if (!grid.isAdjacent(a, b)) return false;
+
+  // a special tile is always actionable when swapped, regardless of color
+  const cellA = grid.get(a.row, a.col);
+  const cellB = grid.get(b.row, b.col);
+  if ((cellA !== null && typeof cellA !== 'string') || (cellB !== null && typeof cellB !== 'string')) {
+    return true;
+  }
+
   grid.swap(a, b);
   const valid = hasMatchAt(grid, a) || hasMatchAt(grid, b);
   grid.swap(a, b);

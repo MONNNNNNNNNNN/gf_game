@@ -14,6 +14,7 @@ export type EventMap = {
   'game:restart': undefined;
   'settings:open': undefined;
   'settings:sound': { enabled: boolean };
+  'settings:colorblind': { enabled: boolean };
   'highscore:beaten': { score: number };
   'run:timeUpdate': { remaining: number; max: number };
   'run:xpUpdate': { xp: number; level: number; xpToNext: number };

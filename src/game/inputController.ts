@@ -10,6 +10,8 @@ interface InputControllerOptions {
   isBusy: () => boolean;
   onSwapAttempt: (a: GridPos, b: GridPos) => void;
   onSelectionChange?: (pos: GridPos | null) => void;
+  isActivatable?: (pos: GridPos) => boolean;
+  onActivate?: (pos: GridPos) => void;
 }
 
 const DRAG_COMMIT_RATIO = 0.3;
@@ -25,7 +27,8 @@ function isAdjacentCell(a: GridPos, b: GridPos): boolean {
 }
 
 export function createInputController(scene: Phaser.Scene, opts: InputControllerOptions): void {
-  const { originX, originY, cellSize, gridWidth, gridHeight, isBusy, onSwapAttempt, onSelectionChange } = opts;
+  const { originX, originY, cellSize, gridWidth, gridHeight, isBusy, onSwapAttempt, onSelectionChange, isActivatable, onActivate } =
+    opts;
 
   let downCell: GridPos | null = null;
   let downWorld: { x: number; y: number } | null = null;
@@ -97,6 +100,10 @@ export function createInputController(scene: Phaser.Scene, opts: InputController
       const from = selected;
       setSelected(null);
       onSwapAttempt(from, cell);
+      return;
+    }
+    if (!selected && isActivatable?.(cell)) {
+      onActivate?.(cell);
       return;
     }
     setSelected(cell);

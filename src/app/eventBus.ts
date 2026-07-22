@@ -1,3 +1,11 @@
+export interface ItemChoice {
+  itemId: string;
+  name: string;
+  description: string;
+  isUpgrade: boolean;
+  nextLevel: number;
+}
+
 export type EventMap = {
   'score:update': { score: number };
   'combo:update': { combo: number };
@@ -7,6 +15,13 @@ export type EventMap = {
   'settings:open': undefined;
   'settings:sound': { enabled: boolean };
   'highscore:beaten': { score: number };
+  'run:timeUpdate': { remaining: number; max: number };
+  'run:xpUpdate': { xp: number; level: number; xpToNext: number };
+  'run:levelUp': { level: number; choices: ItemChoice[]; rerollAvailable: boolean };
+  'run:resumed': undefined;
+  'run:choiceMade': { itemId: string };
+  'run:rerollRequested': undefined;
+  'run:ended': { finalScore: number; level: number; durationSec: number };
 };
 
 type Listener<T> = (payload: T) => void;

@@ -6,8 +6,11 @@ import { ComboTracker } from '../scoring';
 import { TileSprite } from '../tileSprite';
 import { createInputController } from '../inputController';
 import { shuffleGrid } from '../reshuffle';
+import { RunController } from '../run/RunController';
 import { eventBus } from '../../app/eventBus';
 import * as storage from '../../lib/storage';
+import { submitScore } from '../../lib/leaderboard';
+import { logRunEnded } from '../../lib/analytics';
 import type { GridPos } from '../../lib/types';
 
 export class BoardScene extends Phaser.Scene {
@@ -20,15 +23,32 @@ export class BoardScene extends Phaser.Scene {
   private combo = new ComboTracker();
   private score = 0;
   private highlightedIndex: number | null = null;
+  private run!: RunController;
+  private runEndHandled = false;
 
   constructor() {
     super('BoardScene');
   }
 
   create(): void {
+    this.setupRun();
     this.setupBoard();
     this.setupInput();
     eventBus.on('game:restart', () => this.restart());
+    eventBus.on('run:choiceMade', ({ itemId }) => this.run.applyItemChoice(itemId));
+    eventBus.on('run:rerollRequested', () => this.run.rerollChoices());
+  }
+
+  update(_time: number, delta: number): void {
+    this.run.tick(delta / 1000);
+    if (this.run.hasEnded() && !this.runEndHandled) {
+      void this.handleRunEnd();
+    }
+  }
+
+  private setupRun(): void {
+    this.run = new RunController();
+    this.runEndHandled = false;
   }
 
   private setupBoard(): void {
@@ -67,7 +87,7 @@ export class BoardScene extends Phaser.Scene {
       cellSize: this.cellSize,
       gridWidth: this.grid.width,
       gridHeight: this.grid.height,
-      isBusy: () => this.busy,
+      isBusy: () => this.busy || this.run.isPaused,
       onSwapAttempt: (a, b) => this.attemptSwap(a, b),
       onSelectionChange: (pos) => this.handleSelectionChange(pos),
     });
@@ -91,11 +111,12 @@ export class BoardScene extends Phaser.Scene {
     this.score = 0;
     eventBus.emit('score:update', { score: 0 });
     eventBus.emit('combo:update', { combo: 0 });
+    this.setupRun();
     this.setupBoard();
   }
 
   private async attemptSwap(a: GridPos, b: GridPos): Promise<void> {
-    if (this.busy) return;
+    if (this.busy || this.run.isPaused) return;
     if (!isValidSwap(this.grid, a, b)) {
       await this.animateInvalidSwap(a, b);
       return;
@@ -104,15 +125,18 @@ export class BoardScene extends Phaser.Scene {
     this.busy = true;
     this.grid.swap(a, b);
     await this.swapSprites(a, b);
-    this.combo.reset();
+    this.combo.reset(this.run.getModifiers().softComboReset);
     await this.resolveAndAnimate();
 
     if (!hasAnyValidMove(this.grid)) {
-      eventBus.emit('board:stuck', undefined);
-      await this.delay(1400);
+      const instant = Math.random() < this.run.getModifiers().freeReshuffleChance;
+      if (!instant) {
+        eventBus.emit('board:stuck', undefined);
+        await this.delay(1400);
+      }
       shuffleGrid(this.grid);
       await this.reshuffleAnimation();
-      eventBus.emit('board:reshuffled', undefined);
+      if (!instant) eventBus.emit('board:reshuffled', undefined);
     }
     this.busy = false;
   }
@@ -179,10 +203,17 @@ export class BoardScene extends Phaser.Scene {
       }
       await Promise.all(spawnPromises);
 
-      const scoreEvent = this.combo.scoreStep(step);
+      const modifiers = this.run.getModifiers();
+      const scoreEvent = this.combo.scoreStep(step, {
+        scoreMultiplier: modifiers.scoreMultiplier,
+        cascadeStepBonus: modifiers.cascadeStepBonus,
+        longMatchBonusMultiplier: modifiers.longMatchBonusMultiplier,
+      });
       this.score += scoreEvent.points;
       eventBus.emit('score:update', { score: this.score });
       eventBus.emit('combo:update', { combo: scoreEvent.combo });
+
+      this.run.registerCascadeStep(step, scoreEvent);
 
       if (storage.setHighScoreIfBeaten(this.score)) {
         eventBus.emit('highscore:beaten', { score: this.score });
@@ -194,6 +225,18 @@ export class BoardScene extends Phaser.Scene {
     await Promise.all(this.sprites.map((s) => s?.fadeOut(this) ?? Promise.resolve()));
     this.sprites.forEach((s) => s?.destroy());
     this.renderAllTiles();
+  }
+
+  private async handleRunEnd(): Promise<void> {
+    this.runEndHandled = true;
+    const nickname = storage.getNickname() ?? 'Player';
+    const finalScore = this.score;
+    const level = this.run.getLevel();
+    const durationSec = this.run.getElapsed();
+
+    eventBus.emit('run:ended', { finalScore, level, durationSec });
+    void submitScore(nickname, finalScore);
+    void logRunEnded({ nickname, finalScore, level, durationSec, itemsPicked: this.run.getPickHistory() });
   }
 
   private delay(ms: number): Promise<void> {

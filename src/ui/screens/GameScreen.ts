@@ -1,6 +1,8 @@
 import { eventBus } from '../../app/eventBus';
 import { mountHud } from '../components/Hud';
 import { createToast } from '../components/Toast';
+import { mountLevelUpModal } from '../components/LevelUpModal';
+import { mountRunSummaryOverlay } from '../components/RunSummaryOverlay';
 
 export function mountGameScreen(container: HTMLElement): () => void {
   const root = document.createElement('div');
@@ -24,6 +26,8 @@ export function mountGameScreen(container: HTMLElement): () => void {
 
   const unmountHud = mountHud(root);
   const toast = createToast(root);
+  const unmountLevelUp = mountLevelUpModal();
+  const unmountRunSummary = mountRunSummaryOverlay(root);
 
   const offStuck = eventBus.on('board:stuck', () => {
     toast.show('No more moves — reshuffling…');
@@ -35,6 +39,8 @@ export function mountGameScreen(container: HTMLElement): () => void {
     offStuck();
     offReshuffled();
     unmountHud();
+    unmountLevelUp();
+    unmountRunSummary();
     toast.destroy();
     destroyPhaserGame?.();
     root.remove();

@@ -18,7 +18,21 @@ export function mountHud(container: HTMLElement): () => void {
   comboEl.className =
     'text-yellow-300 font-bold text-lg opacity-0 scale-90 transition-all duration-200 drop-shadow';
 
-  left.append(scoreEl, comboEl);
+  const timerTrack = document.createElement('div');
+  timerTrack.className = 'w-40 h-2 rounded-full bg-black/30 overflow-hidden mt-1';
+  const timerFill = document.createElement('div');
+  timerFill.className = 'h-full bg-emerald-400 transition-[width] duration-200';
+  timerFill.style.width = '100%';
+  timerTrack.appendChild(timerFill);
+
+  const xpTrack = document.createElement('div');
+  xpTrack.className = 'w-40 h-1.5 rounded-full bg-black/30 overflow-hidden mt-1';
+  const xpFill = document.createElement('div');
+  xpFill.className = 'h-full bg-sky-400 transition-[width] duration-200';
+  xpFill.style.width = '0%';
+  xpTrack.appendChild(xpFill);
+
+  left.append(scoreEl, comboEl, timerTrack, xpTrack);
 
   const controls = document.createElement('div');
   controls.className = 'flex gap-2';
@@ -57,9 +71,24 @@ export function mountHud(container: HTMLElement): () => void {
     comboFadeTimer = setTimeout(() => comboEl.classList.add('opacity-0', 'scale-90'), 1200);
   });
 
+  const offTime = eventBus.on('run:timeUpdate', ({ remaining, max }) => {
+    const pct = max > 0 ? Math.max(0, Math.min(100, (remaining / max) * 100)) : 0;
+    timerFill.style.width = `${pct}%`;
+    timerFill.classList.toggle('bg-emerald-400', pct > 50);
+    timerFill.classList.toggle('bg-yellow-400', pct <= 50 && pct > 20);
+    timerFill.classList.toggle('bg-red-500', pct <= 20);
+  });
+
+  const offXp = eventBus.on('run:xpUpdate', ({ xp, xpToNext }) => {
+    const pct = xpToNext > 0 ? Math.max(0, Math.min(100, (xp / xpToNext) * 100)) : 0;
+    xpFill.style.width = `${pct}%`;
+  });
+
   return () => {
     offScore();
     offCombo();
+    offTime();
+    offXp();
     if (comboFadeTimer) clearTimeout(comboFadeTimer);
     hud.remove();
   };

@@ -27,6 +27,13 @@ export function mountHomeScreen(container: HTMLElement): () => void {
     onClick: () => router.go('game'),
   });
 
+  const leaderboardBtn = createButton({
+    label: 'Leaderboard',
+    variant: 'ghost',
+    className: 'text-white/80 underline underline-offset-4',
+    onClick: () => router.go('leaderboard'),
+  });
+
   const settingsBtn = createButton({
     label: 'Settings',
     variant: 'ghost',
@@ -34,7 +41,7 @@ export function mountHomeScreen(container: HTMLElement): () => void {
     onClick: () => eventBus.emit('settings:open', undefined),
   });
 
-  root.append(title, subtitle, highScoreEl, playBtn, settingsBtn);
+  root.append(title, subtitle, highScoreEl, playBtn, leaderboardBtn, settingsBtn);
   container.appendChild(root);
 
   return () => root.remove();

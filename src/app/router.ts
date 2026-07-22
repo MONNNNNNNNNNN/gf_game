@@ -1,6 +1,7 @@
 import type { ScreenName } from '../lib/types';
 import { mountHomeScreen } from '../ui/screens/HomeScreen';
 import { mountGameScreen } from '../ui/screens/GameScreen';
+import { mountLeaderboardScreen } from '../ui/screens/LeaderboardScreen';
 
 type UnmountFn = () => void;
 type MountFn = (container: HTMLElement) => UnmountFn | void;
@@ -8,6 +9,7 @@ type MountFn = (container: HTMLElement) => UnmountFn | void;
 const screens: Record<ScreenName, MountFn> = {
   home: mountHomeScreen,
   game: mountGameScreen,
+  leaderboard: mountLeaderboardScreen,
 };
 
 class Router {

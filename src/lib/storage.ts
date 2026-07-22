@@ -1,5 +1,14 @@
 const HIGH_SCORE_KEY = 'gf_game.highScore';
 const SOUND_KEY = 'gf_game.soundEnabled';
+const NICKNAME_KEY = 'gf_game.nickname';
+const LOCAL_SCORES_KEY = 'gf_game.localScores';
+const MAX_LOCAL_SCORES = 20;
+
+export interface LocalScoreEntry {
+  nickname: string;
+  score: number;
+  createdAt: string;
+}
 
 function safeGet(key: string): string | null {
   try {
@@ -41,4 +50,34 @@ export function getSoundEnabled(): boolean {
 
 export function setSoundEnabled(enabled: boolean): void {
   safeSet(SOUND_KEY, enabled ? '1' : '0');
+}
+
+export function getNickname(): string | null {
+  return safeGet(NICKNAME_KEY);
+}
+
+export function setNickname(name: string): void {
+  safeSet(NICKNAME_KEY, name);
+}
+
+function getLocalScoresRaw(): LocalScoreEntry[] {
+  const raw = safeGet(LOCAL_SCORES_KEY);
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export function addLocalScore(nickname: string, score: number): void {
+  const list = getLocalScoresRaw();
+  list.push({ nickname, score, createdAt: new Date().toISOString() });
+  list.sort((a, b) => b.score - a.score);
+  safeSet(LOCAL_SCORES_KEY, JSON.stringify(list.slice(0, MAX_LOCAL_SCORES)));
+}
+
+export function getLocalScores(limit = 10): LocalScoreEntry[] {
+  return getLocalScoresRaw().slice(0, limit);
 }

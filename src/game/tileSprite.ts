@@ -21,6 +21,16 @@ export class TileSprite {
     this.gameObject.setTexture(key);
   }
 
+  snapTo(x: number, y: number): void {
+    this.gameObject.setPosition(x, y);
+    this.gameObject.setScale(1);
+    this.gameObject.setAlpha(1);
+  }
+
+  getPosition(): { x: number; y: number } {
+    return { x: this.gameObject.x, y: this.gameObject.y };
+  }
+
   moveTo(scene: Phaser.Scene, x: number, y: number, duration = 180): Promise<void> {
     return new Promise((resolve) => {
       scene.tweens.add({

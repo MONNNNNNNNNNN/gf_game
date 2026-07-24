@@ -34,6 +34,20 @@ export class SpecialTileSprite {
     // special tiles already read visually distinct from plain tiles (shape/glyph/pulse) - no-op
   }
 
+  snapTo(x: number, y: number): void {
+    this.main.setPosition(x, y);
+    this.main.setScale(1);
+    this.main.setAlpha(1);
+    if (this.ring) {
+      this.ring.setPosition(x, y);
+      this.ring.setAlpha(1);
+    }
+  }
+
+  getPosition(): { x: number; y: number } {
+    return { x: this.main.x, y: this.main.y };
+  }
+
   setHighlighted(active: boolean): void {
     this.main.setScale(active ? 1.15 : 1);
   }

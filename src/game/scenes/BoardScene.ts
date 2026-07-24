@@ -47,6 +47,36 @@ export class BoardScene extends Phaser.Scene {
       this.colorblindMode = enabled;
       this.sprites.forEach((s) => s?.setColorblindMode(enabled));
     });
+
+    if (import.meta.env.DEV) {
+      // test hook: lets automated checks assert grid/sprite consistency programmatically
+      (window as unknown as Record<string, unknown>).__boardDump = () => this.dumpBoardState();
+    }
+  }
+
+  private dumpBoardState(): {
+    busy: boolean;
+    cells: { row: number; col: number; cell: string | null; spriteX: number | null; spriteY: number | null; expectedX: number; expectedY: number }[];
+  } {
+    const cells = [];
+    for (let row = 0; row < this.grid.height; row++) {
+      for (let col = 0; col < this.grid.width; col++) {
+        const cell = this.grid.get(row, col);
+        const sprite = this.sprites[this.grid.index(row, col)];
+        const world = this.cellToWorld({ row, col });
+        const pos = sprite?.getPosition() ?? null;
+        cells.push({
+          row,
+          col,
+          cell: cell === null ? null : typeof cell === 'string' ? cell : `special:${cell.kind}`,
+          spriteX: pos?.x ?? null,
+          spriteY: pos?.y ?? null,
+          expectedX: world.x,
+          expectedY: world.y,
+        });
+      }
+    }
+    return { busy: this.busy, cells };
   }
 
   update(_time: number, delta: number): void {
@@ -149,7 +179,16 @@ export class BoardScene extends Phaser.Scene {
     const involvesSpecial = isSpecialTile(cellA) || isSpecialTile(cellB);
 
     if (!involvesSpecial && !isValidSwap(this.grid, a, b)) {
-      await this.animateInvalidSwap(a, b);
+      // must hold `busy` for the shake too - otherwise a valid swap starting mid-shake
+      // tweens the same sprite, and the shake's snap-back then parks it at a stale
+      // position, leaving two sprites overlapping one cell (seen on a real device)
+      this.busy = true;
+      try {
+        await this.animateInvalidSwap(a, b);
+      } finally {
+        this.busy = false;
+        this.consumePendingAction();
+      }
       return;
     }
 
@@ -257,6 +296,7 @@ export class BoardScene extends Phaser.Scene {
   }
 
   private async finishTurn(): Promise<void> {
+    this.resyncSprites();
     if (!hasAnyValidMove(this.grid)) {
       const instant = Math.random() < this.run.getModifiers().freeReshuffleChance;
       if (!instant) {
@@ -266,6 +306,45 @@ export class BoardScene extends Phaser.Scene {
       shuffleGrid(this.grid);
       await this.reshuffleAnimation();
       if (!instant) eventBus.emit('board:reshuffled', undefined);
+    }
+  }
+
+  /** Hard reconciliation between grid state and rendered sprites, run after every settled
+   * turn. Animation races (interrupted tweens, the special-swap slide gesture, anything
+   * unforeseen on a slow device) can leave a sprite parked at the wrong cell or missing
+   * entirely - visually "overlapping balls". Rather than trusting every animation path to
+   * be perfect, snap every sprite to its true cell and rebuild any missing/orphaned ones. */
+  private resyncSprites(): void {
+    for (let row = 0; row < this.grid.height; row++) {
+      for (let col = 0; col < this.grid.width; col++) {
+        const idx = this.grid.index(row, col);
+        const cell = this.grid.get(row, col);
+        const sprite = this.sprites[idx];
+
+        if (cell === null) {
+          if (sprite) {
+            sprite.destroy();
+            this.sprites[idx] = null;
+          }
+          continue;
+        }
+
+        if (!sprite) {
+          this.sprites[idx] = this.createSpriteAt({ row, col });
+          continue;
+        }
+
+        // sprite kind must match cell kind (plain vs special) - rebuild if mismatched
+        const isSpecialSprite = sprite instanceof SpecialTileSprite;
+        if (isSpecialSprite !== isSpecialTile(cell)) {
+          sprite.destroy();
+          this.sprites[idx] = this.createSpriteAt({ row, col });
+          continue;
+        }
+
+        const { x, y } = this.cellToWorld({ row, col });
+        sprite.snapTo(x, y);
+      }
     }
   }
 

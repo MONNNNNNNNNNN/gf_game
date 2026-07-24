@@ -1,43 +1,16 @@
 import Phaser from 'phaser';
 import type { SpecialKind } from './grid';
 import type { TileType } from '../lib/types';
-
-const TILE_COLORS: Record<TileType, number> = {
-  red: 0xe6553c,
-  blue: 0x3d8ce8,
-  green: 0x2e9e6b,
-  yellow: 0xf2c14e,
-  purple: 0xa06bd6,
-  orange: 0xf2894e,
-};
-
-const KIND_GLYPHS: Record<SpecialKind, string> = {
-  lineRow: '↔', // left-right arrow
-  lineCol: '↕', // up-down arrow
-  butterfly: '🦋', // butterfly emoji
-  bomb: '💥', // collision/explosion emoji
-};
+import { ensureSpecialTexture } from './tileTextures';
 
 export class SpecialTileSprite {
-  private readonly main: Phaser.GameObjects.Rectangle | Phaser.GameObjects.Arc;
-  private readonly glyph: Phaser.GameObjects.Text;
+  private readonly main: Phaser.GameObjects.Image;
   private readonly ring: Phaser.GameObjects.Arc | null = null;
   private ringTween: Phaser.Tweens.Tween | null = null;
 
   constructor(scene: Phaser.Scene, x: number, y: number, radius: number, kind: SpecialKind, baseTile: TileType) {
-    const color = TILE_COLORS[baseTile];
-
-    if (kind === 'lineRow' || kind === 'lineCol') {
-      const long = radius * 2.1;
-      const short = radius * 1.1;
-      const width = kind === 'lineRow' ? long : short;
-      const height = kind === 'lineRow' ? short : long;
-      this.main = scene.add.rectangle(x, y, width, height, color);
-      this.main.setStrokeStyle(2, 0xffffff, 0.45);
-    } else {
-      this.main = scene.add.circle(x, y, radius, color);
-      this.main.setStrokeStyle(2, 0xffffff, 0.45);
-    }
+    const key = ensureSpecialTexture(scene, kind, baseTile, radius);
+    this.main = scene.add.image(x, y, key);
 
     if (kind === 'bomb') {
       this.ring = scene.add.circle(x, y, radius * 1.15);
@@ -51,15 +24,10 @@ export class SpecialTileSprite {
         ease: 'Sine.easeInOut',
       });
     }
-
-    this.glyph = scene.add.text(x, y, KIND_GLYPHS[kind], {
-      fontSize: `${Math.round(radius * (kind === 'lineRow' || kind === 'lineCol' ? 0.75 : 1.1))}px`,
-    });
-    this.glyph.setOrigin(0.5, 0.5);
   }
 
-  private get targets(): (Phaser.GameObjects.Rectangle | Phaser.GameObjects.Arc | Phaser.GameObjects.Text)[] {
-    return this.ring ? [this.main, this.glyph, this.ring] : [this.main, this.glyph];
+  private get targets(): (Phaser.GameObjects.Image | Phaser.GameObjects.Arc)[] {
+    return this.ring ? [this.main, this.ring] : [this.main];
   }
 
   setColorblindMode(_active: boolean): void {
@@ -68,7 +36,6 @@ export class SpecialTileSprite {
 
   setHighlighted(active: boolean): void {
     this.main.setScale(active ? 1.15 : 1);
-    this.glyph.setScale(active ? 1.15 : 1);
   }
 
   moveTo(scene: Phaser.Scene, x: number, y: number, duration = 180): Promise<void> {
@@ -148,7 +115,6 @@ export class SpecialTileSprite {
   destroy(): void {
     this.ringTween?.stop();
     this.main.destroy();
-    this.glyph.destroy();
     this.ring?.destroy();
   }
 }

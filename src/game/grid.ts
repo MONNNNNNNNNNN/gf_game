@@ -85,7 +85,7 @@ export function createGrid(width = GRID_WIDTH, height = GRID_HEIGHT, rng: () => 
       let tile: TileType;
       do {
         tile = randomTile(rng);
-      } while (createsImmediateMatch(grid, row, col, tile));
+      } while (createsImmediateMatch(grid, row, col, tile) || createsImmediateSquare(grid, row, col, tile));
       grid.set(row, col, tile);
     }
   }
@@ -96,4 +96,15 @@ function createsImmediateMatch(grid: Grid, row: number, col: number, tile: TileT
   if (col >= 2 && grid.get(row, col - 1) === tile && grid.get(row, col - 2) === tile) return true;
   if (row >= 2 && grid.get(row - 1, col) === tile && grid.get(row - 2, col) === tile) return true;
   return false;
+}
+
+function createsImmediateSquare(grid: Grid, row: number, col: number, tile: TileType): boolean {
+  // squares always convert to a Butterfly, so a fresh board must not hand one out for free
+  return (
+    row >= 1 &&
+    col >= 1 &&
+    grid.get(row, col - 1) === tile &&
+    grid.get(row - 1, col) === tile &&
+    grid.get(row - 1, col - 1) === tile
+  );
 }

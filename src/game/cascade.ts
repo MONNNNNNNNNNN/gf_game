@@ -28,11 +28,14 @@ export function resolveBoard(
   const steps: CascadeStep[] = [];
   let matches = findMatches(grid);
   let isFirstIteration = true;
+  let iterations = 0;
+  const MAX_ITERATIONS = 60; // refill randomness makes endless square re-formation vanishingly unlikely; hard cap anyway
 
   // do-while (not while): must run at least once even with zero initial matches, since this
   // is also used to resolve gravity/refill after a special-tile detonation clears cells that
   // don't necessarily form a "match" - those empty cells still need to fall/refill.
   do {
+    iterations++;
     const squareMatches = detectSquares(grid);
     const { spawns, plainClearPositions } = classifySpecialSpawns(
       matches,
@@ -54,7 +57,10 @@ export function resolveBoard(
 
     isFirstIteration = false;
     matches = findMatches(grid);
-  } while (matches.length > 0);
+    // loop must also consume 2x2 squares: they aren't "matches" (no 3-run) but the game's
+    // rule is every square becomes a Butterfly - without this, a square formed by the
+    // final refill would sit on the settled board as 4 plain tiles, never converting
+  } while ((matches.length > 0 || detectSquares(grid).length > 0) && iterations < MAX_ITERATIONS);
 
   return steps;
 }

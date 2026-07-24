@@ -1,8 +1,8 @@
 import Phaser from 'phaser';
 import { Grid, createGrid, isTileType, isSpecialTile, GRID_WIDTH, GRID_HEIGHT } from '../grid';
-import { hasAnyValidMove, isValidSwap } from '../matchLogic';
+import { findMatches, hasAnyValidMove, isValidSwap } from '../matchLogic';
 import { resolveBoard, type CascadeStep } from '../cascade';
-import { resolveSoloActivation, resolveComboActivation, type ActivatedTile } from '../specialTiles';
+import { detectSquares, resolveSoloActivation, resolveComboActivation, type ActivatedTile } from '../specialTiles';
 import { ComboTracker } from '../scoring';
 import { TileSprite } from '../tileSprite';
 import { SpecialTileSprite } from '../specialTileSprite';
@@ -296,6 +296,15 @@ export class BoardScene extends Phaser.Scene {
   }
 
   private async finishTurn(): Promise<void> {
+    // safety sweep: a settled board must NEVER hold an unresolved match or 2x2 square.
+    // Whatever path produced one (shuffle giving up, an unforeseen race), resolve it
+    // now rather than leaving matched tiles sitting inert on screen.
+    const leftover = findMatches(this.grid).length > 0 || detectSquares(this.grid).length > 0;
+    if (leftover) {
+      const steps = resolveBoard(this.grid, undefined, 5 - this.run.getModifiers().bombThresholdReduction);
+      await this.animateSteps(steps);
+    }
+
     this.resyncSprites();
     if (!hasAnyValidMove(this.grid)) {
       const instant = Math.random() < this.run.getModifiers().freeReshuffleChance;
@@ -305,6 +314,11 @@ export class BoardScene extends Phaser.Scene {
       }
       shuffleGrid(this.grid);
       await this.reshuffleAnimation();
+      // shuffle re-rolls until clean, but if it hit its attempt cap the board may
+      // still hold a match - sweep once more so it clears instead of sitting inert
+      const steps = findMatches(this.grid).length > 0 ? resolveBoard(this.grid) : [];
+      if (steps.length > 0) await this.animateSteps(steps);
+      this.resyncSprites();
       if (!instant) eventBus.emit('board:reshuffled', undefined);
     }
   }

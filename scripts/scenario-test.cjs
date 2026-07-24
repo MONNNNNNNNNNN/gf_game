@@ -73,14 +73,17 @@ async function waitSettled(maxMs = 5000) {
   return page.evaluate(() => (window.__boardDump ? window.__boardDump() : null));
 }
 
-// Core assertion: every cell has a sprite exactly at its expected position; no nulls; no drift
+// Core assertion: every cell has a sprite exactly at its expected position; no nulls; no drift;
+// and the settled board holds no unresolved 3-run or 2x2 square (both must always clear/convert)
 function assertBoardConsistent(dump, label) {
   if (!dump) {
     failures.push(`${label}: __boardDump unavailable`);
     return;
   }
   const TOLERANCE = 2; // px
+  const colorAt = {};
   for (const c of dump.cells) {
+    colorAt[`${c.row},${c.col}`] = c.cell; // plain color string, "special:*", or null
     if (c.cell === null) {
       failures.push(`${label}: empty grid cell at (${c.row},${c.col})`);
       continue;
@@ -93,6 +96,26 @@ function assertBoardConsistent(dump, label) {
     const dy = Math.abs(c.spriteY - c.expectedY);
     if (dx > TOLERANCE || dy > TOLERANCE) {
       failures.push(`${label}: sprite at (${c.row},${c.col}) drifted by (${dx.toFixed(1)},${dy.toFixed(1)})px`);
+    }
+  }
+
+  const plain = (row, col) => {
+    const v = colorAt[`${row},${col}`];
+    return v && !v.startsWith('special:') ? v : null;
+  };
+  for (let row = 0; row < GRID_HEIGHT; row++) {
+    for (let col = 0; col < GRID_WIDTH; col++) {
+      const v = plain(row, col);
+      if (!v) continue;
+      if (col + 2 < GRID_WIDTH && plain(row, col + 1) === v && plain(row, col + 2) === v) {
+        failures.push(`${label}: unresolved horizontal 3-run of ${v} at (${row},${col})`);
+      }
+      if (row + 2 < GRID_HEIGHT && plain(row + 1, col) === v && plain(row + 2, col) === v) {
+        failures.push(`${label}: unresolved vertical 3-run of ${v} at (${row},${col})`);
+      }
+      if (row + 1 < GRID_HEIGHT && col + 1 < GRID_WIDTH && plain(row, col + 1) === v && plain(row + 1, col) === v && plain(row + 1, col + 1) === v) {
+        failures.push(`${label}: unresolved 2x2 square of ${v} at (${row},${col})`);
+      }
     }
   }
 }

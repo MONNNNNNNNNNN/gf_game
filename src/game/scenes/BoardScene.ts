@@ -30,6 +30,7 @@ export class BoardScene extends Phaser.Scene {
   private run!: RunController;
   private runEndHandled = false;
   private colorblindMode = storage.getColorblindMode();
+  private pendingAction: { type: 'swap'; a: GridPos; b: GridPos } | { type: 'activate'; pos: GridPos } | null = null;
 
   constructor() {
     super('BoardScene');
@@ -124,6 +125,7 @@ export class BoardScene extends Phaser.Scene {
   }
 
   private restart(): void {
+    this.pendingAction = null;
     this.sprites.forEach((s) => s?.destroy());
     this.combo.reset();
     this.score = 0;
@@ -134,7 +136,13 @@ export class BoardScene extends Phaser.Scene {
   }
 
   private async attemptSwap(a: GridPos, b: GridPos): Promise<void> {
-    if (this.busy || this.run.isPaused) return;
+    if (this.run.isPaused) return;
+    if (this.busy) {
+      // real rapid touch-swiping outpaces animation duration - queue the latest gesture
+      // instead of silently dropping it (which felt like "some tiles won't move")
+      this.pendingAction = { type: 'swap', a, b };
+      return;
+    }
 
     const cellA = this.grid.get(a.row, a.col);
     const cellB = this.grid.get(b.row, b.col);
@@ -178,11 +186,16 @@ export class BoardScene extends Phaser.Scene {
       console.error('attemptSwap failed, recovering board state', err);
     } finally {
       this.busy = false;
+      this.consumePendingAction();
     }
   }
 
   private async activateSpecialTileAlone(pos: GridPos): Promise<void> {
-    if (this.busy || this.run.isPaused) return;
+    if (this.run.isPaused) return;
+    if (this.busy) {
+      this.pendingAction = { type: 'activate', pos };
+      return;
+    }
     const cell = this.grid.get(pos.row, pos.col);
     if (!isSpecialTile(cell)) return;
 
@@ -201,7 +214,16 @@ export class BoardScene extends Phaser.Scene {
       console.error('activateSpecialTileAlone failed, recovering board state', err);
     } finally {
       this.busy = false;
+      this.consumePendingAction();
     }
+  }
+
+  private consumePendingAction(): void {
+    if (!this.pendingAction) return;
+    const action = this.pendingAction;
+    this.pendingAction = null;
+    if (action.type === 'swap') void this.attemptSwap(action.a, action.b);
+    else void this.activateSpecialTileAlone(action.pos);
   }
 
   /** Clears an arbitrary set of positions (a special-tile blast), scores it like any other

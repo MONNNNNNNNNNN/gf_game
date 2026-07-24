@@ -16,6 +16,7 @@ export type EventMap = {
   'settings:sound': { enabled: boolean };
   'settings:colorblind': { enabled: boolean };
   'highscore:beaten': { score: number };
+  'highscore:reset': undefined;
   'run:timeUpdate': { remaining: number; max: number };
   'run:xpUpdate': { xp: number; level: number; xpToNext: number };
   'run:levelUp': { level: number; choices: ItemChoice[]; rerollAvailable: boolean };

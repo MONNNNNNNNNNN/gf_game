@@ -81,6 +81,7 @@ export function mountSettingsModal(): void {
     armed = false;
     resetBtn.textContent = 'Reset';
     if (armTimer) clearTimeout(armTimer);
+    eventBus.emit('highscore:reset', undefined);
   });
   resetRow.append(resetLabel, resetBtn);
 

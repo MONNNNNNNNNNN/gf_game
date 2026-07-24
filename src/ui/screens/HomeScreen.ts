@@ -44,5 +44,12 @@ export function mountHomeScreen(container: HTMLElement): () => void {
   root.append(title, subtitle, highScoreEl, playBtn, leaderboardBtn, settingsBtn);
   container.appendChild(root);
 
-  return () => root.remove();
+  const offReset = eventBus.on('highscore:reset', () => {
+    highScoreEl.textContent = `High score: ${storage.getHighScore()}`;
+  });
+
+  return () => {
+    offReset();
+    root.remove();
+  };
 }

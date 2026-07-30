@@ -120,6 +120,48 @@ function assertBoardConsistent(dump, label) {
   }
 }
 
+// Derive the test's own idea of the board layout from the DOM, independently of the app's
+// internal numbers, so a mismatch between the two is detectable rather than shared.
+async function recomputeLayout() {
+  const box = await page.locator('#game-container').boundingBox();
+  cellSize = Math.floor(Math.min(box.width / GRID_WIDTH, box.height / GRID_HEIGHT));
+  originX = box.x + (box.width - cellSize * GRID_WIDTH) / 2 + cellSize / 2;
+  originY = box.y + (box.height - cellSize * GRID_HEIGHT) / 2 + cellSize / 2;
+}
+
+/** The actual regression guard for the resize bug: tap a known cell and confirm the app
+ * resolved that tap to the same cell the test aimed at. Stale origins/cellSize make this
+ * land on a neighbouring tile (or nowhere), which is exactly the reported symptom. */
+async function assertTapHitsIntendedCell(row, col, label) {
+  // clear any existing selection first so we observe this tap specifically
+  const before = await waitSettled();
+  if (before?.highlighted) {
+    await touchTap(before.highlighted.row, before.highlighted.col);
+    await sleep(150);
+  }
+  await touchTap(row, col);
+  await sleep(200);
+  const dump = await waitSettled();
+  if (!dump) {
+    failures.push(`${label}: no dump available`);
+    return;
+  }
+  // a tap on a special tile activates instead of selecting, and a tap that triggers a
+  // swap clears selection - only assert when the tap should have produced a selection
+  if (!dump.highlighted) {
+    failures.push(`${label}: tap aimed at (${row},${col}) produced no selection at all`);
+    return;
+  }
+  if (dump.highlighted.row !== row || dump.highlighted.col !== col) {
+    failures.push(
+      `${label}: tap aimed at (${row},${col}) resolved to (${dump.highlighted.row},${dump.highlighted.col}) - stale hit-testing`,
+    );
+  }
+  // clear it again so we don't leave a pending selection for later scenarios
+  await touchTap(dump.highlighted.row, dump.highlighted.col);
+  await sleep(120);
+}
+
 async function isRunSummaryVisible() {
   return page.evaluate(() => {
     const h2 = Array.from(document.querySelectorAll('h2')).find((el) => el.textContent?.includes('Run complete'));
@@ -180,10 +222,7 @@ async function handleModals() {
   await page.waitForSelector('#game-container canvas', { timeout: 10000 });
   await sleep(600);
 
-  const box = await page.locator('#game-container').boundingBox();
-  cellSize = Math.floor(Math.min(box.width / GRID_WIDTH, box.height / GRID_HEIGHT));
-  originX = box.x + (box.width - cellSize * GRID_WIDTH) / 2 + cellSize / 2;
-  originY = box.y + (box.height - cellSize * GRID_HEIGHT) / 2 + cellSize / 2;
+  await recomputeLayout();
 
   // === Scenario 1: initial board consistency ===
   assertBoardConsistent(await waitSettled(), 'S1-initial');
@@ -248,8 +287,51 @@ async function handleModals() {
   assertBoardConsistent(await waitSettled(), 'S6-restart');
   console.log('S6 restart: checked');
 
-  // === Scenario 7: play until run ends naturally (timer), then Play Again ===
-  console.log('S7 waiting for natural run end (timer depletion)...');
+  // === Scenario 7: viewport/orientation changes (the reported stale-hit-testing bug) ===
+  // baseline: taps must hit the intended cell before any resize
+  await assertTapHitsIntendedCell(3, 4, 'S7-portrait-baseline');
+
+  const sizes = [
+    { width: 900, height: 500, label: 'landscape' },
+    { width: 412, height: 915, label: 'back-to-portrait' },
+    { width: 412, height: 500, label: 'keyboard-open-ish' },
+    { width: 360, height: 780, label: 'small-portrait' },
+  ];
+  for (const s of sizes) {
+    await page.setViewportSize({ width: s.width, height: s.height });
+    await sleep(500); // debounce (120ms) + relayout + tween settle
+    await recomputeLayout();
+    const dump = await waitSettled();
+    assertBoardConsistent(dump, `S7-${s.label}`);
+    // app's internal layout must agree with what the DOM implies, else hit-testing drifts
+    if (dump && Math.abs(dump.layout.cellSize - cellSize) > 1) {
+      failures.push(`S7-${s.label}: app cellSize ${dump.layout.cellSize} != DOM-derived ${cellSize}`);
+    }
+    await assertTapHitsIntendedCell(2, 3, `S7-${s.label}-tap`);
+    await assertTapHitsIntendedCell(6, 1, `S7-${s.label}-tap2`);
+    // board must still be playable after the resize
+    await touchSwipe({ row: 4, col: 2 }, { row: 4, col: 3 });
+    await sleep(300);
+    await handleModals();
+    assertBoardConsistent(await waitSettled(), `S7-${s.label}-after-swipe`);
+  }
+  console.log('S7 orientation/viewport changes (4 sizes, hit-testing + playability): checked');
+
+  // === Scenario 8: resize landing MID-ANIMATION must not corrupt the board ===
+  for (let i = 0; i < 8; i++) {
+    await touchSwipe({ row: 3, col: 1 }, { row: 3, col: 2 });
+    await page.setViewportSize({ width: i % 2 === 0 ? 800 : 412, height: i % 2 === 0 ? 520 : 915 });
+    await sleep(400);
+    await handleModals();
+  }
+  await sleep(600);
+  await recomputeLayout();
+  assertBoardConsistent(await waitSettled(), 'S8-resize-mid-animation');
+  await assertTapHitsIntendedCell(5, 5, 'S8-tap-after');
+  console.log('S8 resize mid-animation (8 rounds): checked');
+
+  // === Scenario 9: play until run ends naturally (timer), then Play Again ===
+  console.log('S9 waiting for natural run end (timer depletion)...');
   let runEnded = false;
   for (let i = 0; i < 300; i++) {
     if (await isRunSummaryVisible()) {
@@ -259,12 +341,12 @@ async function handleModals() {
     if (await isLevelUpVisible()) await handleModals();
     await sleep(500);
   }
-  if (!runEnded) failures.push('S7: run never ended within timeout');
+  if (!runEnded) failures.push('S9: run never ended within timeout');
   else {
     await page.click('text=Play Again');
     await sleep(700);
-    assertBoardConsistent(await waitSettled(), 'S7-after-play-again');
-    console.log('S7 natural run end + Play Again: checked');
+    assertBoardConsistent(await waitSettled(), 'S9-after-play-again');
+    console.log('S9 natural run end + Play Again: checked');
   }
 
   // === Results ===

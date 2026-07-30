@@ -31,6 +31,8 @@ export class BoardScene extends Phaser.Scene {
   private runEndHandled = false;
   private colorblindMode = storage.getColorblindMode();
   private pendingAction: { type: 'swap'; a: GridPos; b: GridPos } | { type: 'activate'; pos: GridPos } | null = null;
+  private pendingRelayout = false;
+  private resizeDebounce: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
     super('BoardScene');
@@ -48,6 +50,22 @@ export class BoardScene extends Phaser.Scene {
       this.sprites.forEach((s) => s?.setColorblindMode(enabled));
     });
 
+    // orientation change / browser resize / mobile keyboard: without this the board keeps
+    // drawing at the old cellSize while touch hit-testing uses stale origins, so taps land
+    // on the wrong tile. Debounced because Phaser fires resize continuously during a drag.
+    this.scale.on('resize', () => {
+      if (this.resizeDebounce) clearTimeout(this.resizeDebounce);
+      this.resizeDebounce = setTimeout(() => {
+        this.resizeDebounce = null;
+        this.relayout();
+      }, 120);
+    });
+
+    this.events.once('shutdown', () => {
+      if (this.resizeDebounce) clearTimeout(this.resizeDebounce);
+      this.scale.off('resize');
+    });
+
     if (import.meta.env.DEV) {
       // test hook: lets automated checks assert grid/sprite consistency programmatically
       (window as unknown as Record<string, unknown>).__boardDump = () => this.dumpBoardState();
@@ -56,6 +74,8 @@ export class BoardScene extends Phaser.Scene {
 
   private dumpBoardState(): {
     busy: boolean;
+    layout: { originX: number; originY: number; cellSize: number };
+    highlighted: { row: number; col: number } | null;
     cells: { row: number; col: number; cell: string | null; spriteX: number | null; spriteY: number | null; expectedX: number; expectedY: number }[];
   } {
     const cells = [];
@@ -76,7 +96,15 @@ export class BoardScene extends Phaser.Scene {
         });
       }
     }
-    return { busy: this.busy, cells };
+    return {
+      busy: this.busy,
+      layout: { originX: this.originX, originY: this.originY, cellSize: this.cellSize },
+      highlighted:
+        this.highlightedIndex === null
+          ? null
+          : { row: Math.floor(this.highlightedIndex / this.grid.width), col: this.highlightedIndex % this.grid.width },
+      cells,
+    };
   }
 
   update(_time: number, delta: number): void {
@@ -91,17 +119,38 @@ export class BoardScene extends Phaser.Scene {
     this.runEndHandled = false;
   }
 
-  private setupBoard(): void {
+  /** Pure layout math - safe to re-run on resize without touching grid state. */
+  private computeLayout(): void {
     const { width, height } = this.scale;
     this.cellSize = Math.floor(Math.min(width / GRID_WIDTH, height / GRID_HEIGHT));
     const boardWidth = this.cellSize * GRID_WIDTH;
     const boardHeight = this.cellSize * GRID_HEIGHT;
     this.originX = (width - boardWidth) / 2 + this.cellSize / 2;
     this.originY = (height - boardHeight) / 2 + this.cellSize / 2;
+  }
 
+  private setupBoard(): void {
+    this.computeLayout();
     this.grid = createGrid(GRID_WIDTH, GRID_HEIGHT);
     if (!hasAnyValidMove(this.grid)) shuffleGrid(this.grid);
     this.renderAllTiles();
+  }
+
+  /** Re-lay-out after a viewport change (rotation, browser resize, mobile keyboard).
+   * Sprites are rebuilt rather than just repositioned: tile textures are baked per
+   * radius, so a new cellSize needs new textures, and grid state is untouched. */
+  private relayout(): void {
+    if (this.busy) {
+      // a resize landing mid-animation would destroy sprites that in-flight tweens
+      // still reference - defer until the turn settles (see finishTurn)
+      this.pendingRelayout = true;
+      return;
+    }
+    this.pendingRelayout = false;
+    this.computeLayout();
+    this.sprites.forEach((s) => s?.destroy());
+    this.renderAllTiles();
+    this.highlightedIndex = null;
   }
 
   private cellToWorld(pos: GridPos): { x: number; y: number } {
@@ -129,9 +178,7 @@ export class BoardScene extends Phaser.Scene {
 
   private setupInput(): void {
     createInputController(this, {
-      originX: this.originX,
-      originY: this.originY,
-      cellSize: this.cellSize,
+      getLayout: () => ({ originX: this.originX, originY: this.originY, cellSize: this.cellSize }),
       gridWidth: this.grid.width,
       gridHeight: this.grid.height,
       isBusy: () => this.busy || this.run.isPaused,
@@ -258,6 +305,10 @@ export class BoardScene extends Phaser.Scene {
   }
 
   private consumePendingAction(): void {
+    // apply a deferred resize first, so any queued gesture is resolved against the
+    // corrected layout rather than the stale one it was recorded under
+    if (this.pendingRelayout) this.relayout();
+
     if (!this.pendingAction) return;
     const action = this.pendingAction;
     this.pendingAction = null;

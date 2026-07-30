@@ -25,6 +25,12 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+        # Vite inlines VITE_* at build time, so these must be present HERE, not at runtime.
+        # Without them the deployed site silently falls back to a local-only leaderboard
+        # (see src/lib/supabaseClient.ts). Safe to leave unset - the fallback is by design.
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist

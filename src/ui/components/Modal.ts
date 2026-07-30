@@ -18,7 +18,7 @@ export function createModal({ content, onClose }: ModalOptions): ModalHandle {
 
   const panel = document.createElement('div');
   panel.className =
-    'bg-neutral-900 text-white rounded-2xl p-6 w-[90%] max-w-sm shadow-2xl scale-95 transition-transform duration-200';
+    'panel-surface bg-neutral-900 text-white rounded-2xl p-6 w-[90%] max-w-sm shadow-2xl scale-95 transition-transform duration-200';
   panel.appendChild(content);
   backdrop.appendChild(panel);
 

@@ -67,14 +67,19 @@ export class BoardScene extends Phaser.Scene {
     });
 
     if (import.meta.env.DEV) {
-      // test hook: lets automated checks assert grid/sprite consistency programmatically
-      (window as unknown as Record<string, unknown>).__boardDump = () => this.dumpBoardState();
+      // test hooks: assert grid/sprite consistency, and deterministically exercise shapes
+      // that random play almost never produces (a pure 2x2 square -> Butterfly)
+      const w = window as unknown as Record<string, unknown>;
+      w.__boardDump = () => this.dumpBoardState();
+      w.__plantShape = (shape: 'square' | 'run4' | 'run5') => void this.devPlantShape(shape);
     }
   }
 
   private dumpBoardState(): {
     busy: boolean;
     layout: { originX: number; originY: number; cellSize: number };
+    aliveBoardObjects: number;
+    orphanObjects: number;
     highlighted: { row: number; col: number } | null;
     cells: { row: number; col: number; cell: string | null; spriteX: number | null; spriteY: number | null; expectedX: number; expectedY: number }[];
   } {
@@ -96,9 +101,27 @@ export class BoardScene extends Phaser.Scene {
         });
       }
     }
+    // Orphan detection: count the board-tile display objects actually alive in the scene and
+    // compare against the sprites we track. A mismatch means a GameObject is still being
+    // drawn but is no longer referenced - invisible to any assertion that only inspects
+    // `this.sprites`, which is precisely how the square-Butterfly orphan bug went unnoticed.
+    const trackedObjects = new Set<Phaser.GameObjects.GameObject>();
+    for (const s of this.sprites) {
+      if (s) for (const o of s.getGameObjects()) trackedObjects.add(o);
+    }
+    let aliveBoardObjects = 0;
+    let orphanObjects = 0;
+    for (const child of this.children.list) {
+      if (!(child instanceof Phaser.GameObjects.Image) && !(child instanceof Phaser.GameObjects.Arc)) continue;
+      aliveBoardObjects++;
+      if (!trackedObjects.has(child)) orphanObjects++;
+    }
+
     return {
       busy: this.busy,
       layout: { originX: this.originX, originY: this.originY, cellSize: this.cellSize },
+      aliveBoardObjects,
+      orphanObjects,
       highlighted:
         this.highlightedIndex === null
           ? null
@@ -304,6 +327,35 @@ export class BoardScene extends Phaser.Scene {
     }
   }
 
+  /** DEV-only: plant a shape and resolve it through the exact same pipeline a real move uses,
+   * so tests can cover shapes random play rarely generates. */
+  private async devPlantShape(shape: 'square' | 'run4' | 'run5'): Promise<void> {
+    if (this.busy) return;
+    this.busy = true;
+    try {
+      const tile: TileType = 'red';
+      if (shape === 'square') {
+        this.grid.set(2, 2, tile);
+        this.grid.set(2, 3, tile);
+        this.grid.set(3, 2, tile);
+        this.grid.set(3, 3, tile);
+      } else {
+        const len = shape === 'run4' ? 4 : 5;
+        for (let c = 0; c < len; c++) this.grid.set(5, c, tile);
+      }
+      this.resyncSprites();
+      this.combo.reset();
+      const steps = resolveBoard(this.grid, undefined, 5 - this.run.getModifiers().bombThresholdReduction);
+      await this.animateSteps(steps);
+      await this.finishTurn();
+    } catch (err) {
+      console.error('devPlantShape failed', err);
+    } finally {
+      this.busy = false;
+      this.consumePendingAction();
+    }
+  }
+
   private consumePendingAction(): void {
     // apply a deferred resize first, so any queued gesture is resolved against the
     // corrected layout rather than the stale one it was recorded under
@@ -336,6 +388,8 @@ export class BoardScene extends Phaser.Scene {
     this.combo.reset(this.run.getModifiers().softComboReset);
     const detonationStep: CascadeStep = {
       matches: [{ positions, tile: baseTile }],
+      squareMatches: [],
+      clearedPositions: positions, // detonate() already cleared these itself
       spawnedSpecials: [],
       fallMoves: [],
       spawned: [],
@@ -411,6 +465,22 @@ export class BoardScene extends Phaser.Scene {
         sprite.snapTo(x, y);
       }
     }
+
+    this.destroyOrphanSprites();
+  }
+
+  /** Destroy board display objects that are still in the scene but no longer referenced by
+   * `this.sprites`. Without this an orphan stays drawn forever (it can't be reached to be
+   * cleaned up), which looked like permanently overlapping balls. */
+  private destroyOrphanSprites(): void {
+    const tracked = new Set<Phaser.GameObjects.GameObject>();
+    for (const s of this.sprites) {
+      if (s) for (const o of s.getGameObjects()) tracked.add(o);
+    }
+    for (const child of [...this.children.list]) {
+      if (!(child instanceof Phaser.GameObjects.Image) && !(child instanceof Phaser.GameObjects.Arc)) continue;
+      if (!tracked.has(child)) child.destroy();
+    }
   }
 
   private async animateInvalidSwap(a: GridPos, b: GridPos): Promise<void> {
@@ -459,21 +529,26 @@ export class BoardScene extends Phaser.Scene {
 
   private async animateSteps(steps: CascadeStep[]): Promise<void> {
     for (const step of steps) {
+      // clear by the authoritative cleared-cell list, NOT step.matches: matches holds only
+      // linear runs, so a Butterfly spawned from a pure 2x2 square left all 4 of its tiles
+      // rendered forever (grid said empty/special, screen still showed the old balls)
       const clearPromises: Promise<void>[] = [];
-      for (const match of step.matches) {
-        for (const pos of match.positions) {
-          const idx = this.grid.index(pos.row, pos.col);
-          const sprite = this.sprites[idx];
-          if (sprite) {
-            clearPromises.push(sprite.clear(this));
-            this.sprites[idx] = null;
-          }
+      for (const pos of step.clearedPositions) {
+        const idx = this.grid.index(pos.row, pos.col);
+        const sprite = this.sprites[idx];
+        if (sprite) {
+          clearPromises.push(sprite.clear(this));
+          this.sprites[idx] = null;
         }
       }
       await Promise.all(clearPromises);
 
       for (const spawn of step.spawnedSpecials) {
         const idx = this.grid.index(spawn.pos.row, spawn.pos.col);
+        // the spawn cell is deliberately excluded from clearedPositions, so a plain sprite
+        // is usually still sitting here - destroy it or it becomes an untracked orphan
+        // that stays drawn on the canvas forever
+        this.sprites[idx]?.destroy();
         this.sprites[idx] = new SpecialTileSprite(
           this,
           this.cellToWorld(spawn.pos).x,

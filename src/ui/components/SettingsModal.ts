@@ -2,6 +2,7 @@ import { eventBus } from '../../app/eventBus';
 import { createModal } from './Modal';
 import { createButton } from './Button';
 import * as storage from '../../lib/storage';
+import { applyDarkMode } from '../theme';
 
 export function mountSettingsModal(): void {
   const content = document.createElement('div');
@@ -59,6 +60,30 @@ export function mountSettingsModal(): void {
   });
   colorblindRow.append(colorblindLabel, colorblindToggle);
 
+  const darkRow = document.createElement('div');
+  darkRow.className = 'flex items-center justify-between';
+  const darkLabel = document.createElement('span');
+  darkLabel.textContent = 'Dark background';
+  const darkToggle = document.createElement('button');
+  darkToggle.type = 'button';
+
+  function renderDarkToggle(): void {
+    const enabled = storage.getDarkMode();
+    darkToggle.textContent = enabled ? 'On' : 'Off';
+    darkToggle.className = `px-4 py-1.5 rounded-full font-semibold ${
+      enabled ? 'bg-pink-500 text-white' : 'bg-neutral-700 text-neutral-300'
+    }`;
+  }
+  renderDarkToggle();
+
+  darkToggle.addEventListener('click', () => {
+    const next = !storage.getDarkMode();
+    storage.setDarkMode(next);
+    applyDarkMode(next);
+    renderDarkToggle();
+  });
+  darkRow.append(darkLabel, darkToggle);
+
   const resetRow = document.createElement('div');
   resetRow.className = 'flex items-center justify-between';
   const resetLabel = document.createElement('span');
@@ -87,7 +112,7 @@ export function mountSettingsModal(): void {
 
   const closeBtn = createButton({ label: 'Close', variant: 'primary', className: 'w-full' });
 
-  content.append(title, soundRow, colorblindRow, resetRow, closeBtn);
+  content.append(title, soundRow, colorblindRow, darkRow, resetRow, closeBtn);
 
   const modal = createModal({ content });
   closeBtn.addEventListener('click', () => modal.close());
@@ -95,6 +120,7 @@ export function mountSettingsModal(): void {
   eventBus.on('settings:open', () => {
     renderSoundToggle();
     renderColorblindToggle();
+    renderDarkToggle();
     modal.open();
   });
 }

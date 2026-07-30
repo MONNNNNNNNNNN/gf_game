@@ -29,7 +29,9 @@ export class ComboTracker {
   scoreStep(step: CascadeStep, modifiers: ScoreModifiers = {}): ScoreEvent {
     this.combo += 1;
     let points = 0;
-    for (const match of step.matches) {
+    // squares count too - a Butterfly spawned from a pure 2x2 square used to score zero,
+    // since squares never appear in `matches`
+    for (const match of [...step.matches, ...(step.squareMatches ?? [])]) {
       const length = match.positions.length;
       let bonus = matchBonusMultiplier(length);
       if (length >= 4 && modifiers.longMatchBonusMultiplier) {

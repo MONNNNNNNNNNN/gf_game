@@ -80,6 +80,18 @@ function assertBoardConsistent(dump, label) {
     failures.push(`${label}: __boardDump unavailable`);
     return;
   }
+  // Orphaned GameObjects are still drawn but no longer referenced by the sprites array, so
+  // comparing only tracked-sprites-vs-grid cannot see them - that blind spot is what let the
+  // square-Butterfly orphan bug ship. Assert on the real scene object count.
+  if (dump.orphanObjects > 0) {
+    failures.push(`${label}: ${dump.orphanObjects} orphaned GameObject(s) still drawn but untracked`);
+  }
+  const expectedObjects = GRID_WIDTH * GRID_HEIGHT;
+  if (dump.aliveBoardObjects > expectedObjects + 2) {
+    // +2 tolerance: a bomb special owns an extra pulsing ring object
+    failures.push(`${label}: ${dump.aliveBoardObjects} board objects alive, expected ~${expectedObjects} (overlap)`);
+  }
+
   const TOLERANCE = 2; // px
   const colorAt = {};
   for (const c of dump.cells) {
@@ -286,6 +298,29 @@ async function handleModals() {
   await sleep(600);
   assertBoardConsistent(await waitSettled(), 'S6-restart');
   console.log('S6 restart: checked');
+
+  // === Scenario 6b: the reported bug - Butterfly from a pure 2x2 square must clear its
+  // tiles, score points, and leave no orphaned sprites. Random play rarely forms a bare
+  // square, so plant each shape deterministically via the dev hook. ===
+  for (const shape of ['square', 'run4', 'run5', 'square']) {
+    const scoreBefore = await page.evaluate(() => {
+      const el = Array.from(document.querySelectorAll('div')).find((d) => /^Score: \d+$/.test(d.textContent || ''));
+      return el ? parseInt(el.textContent.replace('Score: ', ''), 10) : 0;
+    });
+    await page.evaluate((s) => window.__plantShape(s), shape);
+    await sleep(1200);
+    await handleModals();
+    const dump = await waitSettled();
+    assertBoardConsistent(dump, `S6b-${shape}`);
+    const scoreAfter = await page.evaluate(() => {
+      const el = Array.from(document.querySelectorAll('div')).find((d) => /^Score: \d+$/.test(d.textContent || ''));
+      return el ? parseInt(el.textContent.replace('Score: ', ''), 10) : 0;
+    });
+    if (scoreAfter <= scoreBefore) {
+      failures.push(`S6b-${shape}: cleared a ${shape} but score did not increase (${scoreBefore} -> ${scoreAfter})`);
+    }
+  }
+  console.log('S6b planted square/run4/run5 shapes (clear + score + no orphans): checked');
 
   // === Scenario 7: viewport/orientation changes (the reported stale-hit-testing bug) ===
   // baseline: taps must hit the intended cell before any resize

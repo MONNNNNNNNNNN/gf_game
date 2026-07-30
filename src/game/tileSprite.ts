@@ -31,6 +31,11 @@ export class TileSprite {
     return { x: this.gameObject.x, y: this.gameObject.y };
   }
 
+  /** Every display object this sprite owns - used to detect untracked orphans. */
+  getGameObjects(): Phaser.GameObjects.GameObject[] {
+    return [this.gameObject];
+  }
+
   moveTo(scene: Phaser.Scene, x: number, y: number, duration = 180): Promise<void> {
     return new Promise((resolve) => {
       scene.tweens.add({

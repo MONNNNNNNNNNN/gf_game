@@ -48,6 +48,11 @@ export class SpecialTileSprite {
     return { x: this.main.x, y: this.main.y };
   }
 
+  /** Every display object this sprite owns - used to detect untracked orphans. */
+  getGameObjects(): Phaser.GameObjects.GameObject[] {
+    return this.ring ? [this.main, this.ring] : [this.main];
+  }
+
   setHighlighted(active: boolean): void {
     this.main.setScale(active ? 1.15 : 1);
   }

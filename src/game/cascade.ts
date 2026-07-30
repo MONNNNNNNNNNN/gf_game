@@ -13,7 +13,15 @@ export interface SpawnedTile {
 }
 
 export interface CascadeStep {
+  /** Linear 3+ runs only. Do NOT use this to decide which sprites to clear - 2x2 squares
+   * are not in here, and a special-tile spawn cell is intentionally NOT cleared.
+   * Use `clearedPositions` for that. */
   matches: MatchResult[];
+  /** 2x2 squares consumed this step (each becomes a Butterfly). Scored like matches. */
+  squareMatches: MatchResult[];
+  /** Authoritative list of cells emptied this step, already excluding special-spawn
+   * cells. This is what the renderer must clear. */
+  clearedPositions: GridPos[];
   spawnedSpecials: SpecialSpawn[];
   fallMoves: FallMove[];
   spawned: SpawnedTile[];
@@ -53,7 +61,14 @@ export function resolveBoard(
 
     const fallMoves = applyGravity(grid);
     const spawned = refill(grid, rng);
-    steps.push({ matches, spawnedSpecials: spawns, fallMoves, spawned });
+    steps.push({
+      matches,
+      squareMatches,
+      clearedPositions: plainClearPositions,
+      spawnedSpecials: spawns,
+      fallMoves,
+      spawned,
+    });
 
     isFirstIteration = false;
     matches = findMatches(grid);

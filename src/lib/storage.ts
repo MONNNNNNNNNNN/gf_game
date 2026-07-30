@@ -1,6 +1,7 @@
 const HIGH_SCORE_KEY = 'gf_game.highScore';
 const SOUND_KEY = 'gf_game.soundEnabled';
 const COLORBLIND_KEY = 'gf_game.colorblindMode';
+const DARK_MODE_KEY = 'gf_game.darkMode';
 const NICKNAME_KEY = 'gf_game.nickname';
 const LOCAL_SCORES_KEY = 'gf_game.localScores';
 const MAX_LOCAL_SCORES = 20;
@@ -59,6 +60,23 @@ export function getColorblindMode(): boolean {
 
 export function setColorblindMode(enabled: boolean): void {
   safeSet(COLORBLIND_KEY, enabled ? '1' : '0');
+}
+
+export function getDarkMode(): boolean {
+  const raw = safeGet(DARK_MODE_KEY);
+  // default follows the OS preference on first launch, then whatever the player chose
+  if (raw === null) {
+    try {
+      return window.matchMedia('(prefers-color-scheme: dark)').matches;
+    } catch {
+      return false;
+    }
+  }
+  return raw === '1';
+}
+
+export function setDarkMode(enabled: boolean): void {
+  safeSet(DARK_MODE_KEY, enabled ? '1' : '0');
 }
 
 export function getNickname(): string | null {

@@ -11,3 +11,28 @@ body {
   overscroll-behavior: none;
   -webkit-tap-highlight-color: transparent;
 }
+
+/* Screen backgrounds live here rather than as inline Tailwind gradient utilities so dark
+   mode can be toggled by adding `dark` to <html>, with no screen re-mount. Re-mounting
+   GameScreen would tear down and restart the Phaser game mid-run. The Phaser canvas is
+   created with `transparent: true`, so these show through behind the board. */
+.screen-warm {
+  background-image: linear-gradient(to bottom, #f472b6, #e879f9, #a855f7);
+}
+
+.screen-cool {
+  background-image: linear-gradient(to bottom, #6366f1, #7e22ce);
+}
+
+html.dark .screen-warm {
+  background-image: linear-gradient(to bottom, #3b1030, #2a1040, #1a1030);
+}
+
+html.dark .screen-cool {
+  background-image: linear-gradient(to bottom, #10142e, #1a1038);
+}
+
+/* keep the level-up / settings panels legible against the darker backdrop */
+html.dark .panel-surface {
+  background-color: #0b0b14;
+}

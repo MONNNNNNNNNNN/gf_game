@@ -5,7 +5,7 @@ import { getTopScores } from '../../lib/leaderboard';
 export function mountLeaderboardScreen(container: HTMLElement): () => void {
   const root = document.createElement('div');
   root.className =
-    'h-full w-full flex flex-col items-center gap-6 bg-gradient-to-b from-indigo-500 to-purple-700 px-6 pt-[max(2rem,env(safe-area-inset-top))] pb-8 text-white overflow-y-auto';
+    'h-full w-full flex flex-col items-center gap-6 screen-cool px-6 pt-[max(2rem,env(safe-area-inset-top))] pb-8 text-white overflow-y-auto';
 
   const title = document.createElement('h1');
   title.className = 'text-3xl font-extrabold';

@@ -7,7 +7,7 @@ import { mountRunSummaryOverlay } from '../components/RunSummaryOverlay';
 export function mountGameScreen(container: HTMLElement): () => void {
   const root = document.createElement('div');
   root.className =
-    'relative h-full w-full flex items-center justify-center bg-gradient-to-b from-indigo-500 to-purple-700 overflow-hidden';
+    'relative h-full w-full flex items-center justify-center screen-cool overflow-hidden';
 
   const gameContainer = document.createElement('div');
   gameContainer.id = 'game-container';

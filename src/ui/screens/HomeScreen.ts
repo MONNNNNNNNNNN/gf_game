@@ -6,7 +6,7 @@ import * as storage from '../../lib/storage';
 export function mountHomeScreen(container: HTMLElement): () => void {
   const root = document.createElement('div');
   root.className =
-    'h-full w-full flex flex-col items-center justify-center gap-8 bg-gradient-to-b from-pink-400 via-fuchsia-400 to-purple-500 px-6 text-center';
+    'h-full w-full flex flex-col items-center justify-center gap-8 screen-warm px-6 text-center';
 
   const title = document.createElement('h1');
   title.className = 'text-5xl font-extrabold text-white drop-shadow-lg tracking-tight';
